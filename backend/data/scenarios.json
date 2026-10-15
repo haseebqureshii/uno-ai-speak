@@ -1,0 +1,106 @@
+{
+  "scenarios": [
+    {
+      "id": "a1_cafe_order",
+      "cefr_level": "A1",
+      "language": "Spanish",
+      "title": "Ordering Coffee at a Café",
+      "ai_role": "Barista at a busy café in Madrid",
+      "user_task": "Order a hot coffee with milk, ask for the price, and pay.",
+      "target_lexicon": [
+        "café con leche",
+        "cuánto cuesta",
+        "por favor",
+        "gracias"
+      ],
+      "opening_line": "¡Hola! Buenos días, ¿qué le pongo?",
+      "completion_conditions": [
+        "order_placed",
+        "price_asked",
+        "payment_made"
+      ]
+    },
+    {
+      "id": "a2_train_directions",
+      "cefr_level": "A2",
+      "language": "Spanish",
+      "title": "Asking for Train Station Directions",
+      "ai_role": "Information desk clerk at a train station",
+      "user_task": "Find out which platform goes to the airport and ask what time the next train leaves.",
+      "target_lexicon": [
+        "anden",
+        "a qué hora",
+        "próximo tren",
+        "disculpe"
+      ],
+      "opening_line": "Buenas tardes, ¿en qué le puedo ayudar?",
+      "completion_conditions": [
+        "platform_asked",
+        "departure_time_asked"
+      ]
+    },
+    {
+      "id": "b1_doctor_appointment",
+      "cefr_level": "B1",
+      "language": "Spanish",
+      "title": "Booking a Doctor's Appointment",
+      "ai_role": "Receptionist at a medical clinic",
+      "user_task": "Explain that you feel unwell, describe two symptoms, and book an appointment for tomorrow morning.",
+      "target_lexicon": [
+        "tengo dolor de",
+        "me siento mal",
+        "cita",
+        "mañana por la mañana",
+        "¿a qué hora?"
+      ],
+      "opening_line": "Buenos días, Centro Médico San Martín. ¿En qué puedo ayudarle?",
+      "completion_conditions": [
+        "symptoms_described",
+        "appointment_requested",
+        "time_confirmed"
+      ]
+    },
+    {
+      "id": "b2_job_interview",
+      "cefr_level": "B2",
+      "language": "Spanish",
+      "title": "A Short Job Interview",
+      "ai_role": "Hiring manager at a technology company",
+      "user_task": "Introduce yourself, describe your previous experience, and ask two questions about the team and working hours.",
+      "target_lexicon": [
+        "experiencia laboral",
+        "habilidades",
+        "equipo de trabajo",
+        "horario",
+        "¿podría contarme?"
+      ],
+      "opening_line": "Gracias por venir. Cuénteme un poco sobre usted y su experiencia.",
+      "completion_conditions": [
+        "self_introduced",
+        "experience_described",
+        "two_questions_asked"
+      ]
+    },
+    {
+      "id": "c1_debate_environment",
+      "cefr_level": "C1",
+      "language": "Spanish",
+      "title": "Debating Environmental Policy",
+      "ai_role": "Moderator of a city council public debate",
+      "user_task": "Present your stance on a proposed plastic ban, respond to a counter-argument, and propose an alternative solution.",
+      "target_lexicon": [
+        "prohibición",
+        "sostenibilidad",
+        "impacto ambiental",
+        "alternativa viable",
+        "a largo plazo"
+      ],
+      "opening_line": "Adelante, tiene la palabra. ¿Está a favor o en contra de la prohibición de plásticos de un solo uso?",
+      "completion_conditions": [
+        "stance_presented",
+        "counter_argument_addressed",
+        "alternative_solution_proposed"
+      ]
+    }
+  ]
+}

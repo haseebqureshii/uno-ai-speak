@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Root .gitignore for UNO language tutor codebase
+# FastAPI backend + Next.js 14 frontend
+# ─────────────────────────────────────────────────────────────────────────────
+
+# === Environment / secrets ===
+.env*
+!.env.example
+backend/.env
+backend/.env.*
+
+# === Python / FastAPI backend ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/.venv/
+venv/
+ENV/
+env/
+.venv/
+env.bak/
+venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+.eggs/
+*.manifest
+*.spec
+
+# Python test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+*.cover
+*.py,cover
+.hypothesis/
+
+# === Node.js / Next.js frontend ===
+frontend/node_modules/
+node_modules/
+frontend/.next/
+.next/
+frontend/dist/
+frontend/build/
+frontend/.turbo/
+
+# Next.js auto-generated
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Package manager
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# === Logs / diagnostics / runtime ===
+*.log
+logs/
+log/
+*.pid
+*.seed
+*.pid.lock
+
+# === OS / editors / IDEs ===
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# === Misc ===
+*.tmp
+*.temp
+*.bak
+*.orig

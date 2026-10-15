@@ -1,0 +1,45 @@
+# Harness Rules — Audio-First Socratic Language Learning Web App
+
+## 1. Type Discipline
+
+- TypeScript runs in **strict mode** (`strict: true`, `noImplicitAny: true`, `strictNullChecks: true`).
+- Python uses **type hints everywhere** (`def` signatures, Pydantic models, `list[str]`, `dict[str, Any]`).
+- No bare `any` in TypeScript without a comment justifying why it is unavoidable.
+- Prefer branded types over primitive aliases for domain identifiers (`LessonId`, `SessionToken`).
+
+## 2. Async-First & Non-Blocking
+
+- All I/O must be `async` / `await`; no synchronous network calls on the main event loop.
+- Guardrail evaluations run in **non-blocking background tasks** (`asyncio.create_task` / `BackgroundTasks`).
+- WebSocket message handlers must not `await` slow operations directly; queue them.
+
+## 3. Explicit State Validation
+
+- **No audio buffer is emitted without first validating lesson state.**
+- Every state transition must pass through `FSMManager.transition(next_state, reason)`.
+- Every outgoing tutor audio chunk must carry the current `fsm_state` and `session_id` metadata.
+- Reject invalid FSM transitions at the guardrail layer, not silently.
+
+## 4. WebSocket Protocol
+
+- Binary frames are reserved for raw / synthesized audio bytes.
+- JSON frames carry structured control messages with a `type` discriminator.
+- All JSON frames must validate against a Pydantic / Zod schema before processing.
+
+## 5. Error Handling
+
+- Catch and log exceptions, but never crash the WebSocket connection because of a guardrail failure.
+- Send `ERROR` control frames with `recoverable: bool` so the client can decide whether to reconnect.
+- Always close sockets with a documented WS close code.
+
+## 6. Drift Guardrails
+
+- The Jev Governor must return within **150 ms**; callers must timeout and default to safe behavior.
+- Interrupts are opt-in at the Jev layer: `ScoreResult.interrupt_recommended: bool`.
+- If Jev is unreachable, the lesson pauses rather than continuing unguarded.
+
+## 7. Code Organization
+
+- Keep backend modules single-responsibility: `main.py` routes, `fsm.py` state, `jev_governor.py` guardrails.
+- Keep frontend hooks single-responsibility: `useAudioRecorder` captures, `useDuplexSocket` transports.
+- Components must not own transport or state logic; they consume hooks.
