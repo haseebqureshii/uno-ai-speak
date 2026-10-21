@@ -30,11 +30,8 @@ logger = logging.getLogger("audio-tutor")
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
-from starlette.websockets import (
-    WebSocketDisconnect,
-    WebSocketDisconnected,
-    WebSocketState,
-)
+from fastapi import WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from bridges import AppState, get_audio_bridge
 from bridges.base import BaseAudioBridge
@@ -139,7 +136,33 @@ async def audio_tutor_ws(websocket: WebSocket) -> None:
     fsm: FSMManager | None = None
     bridge: BaseAudioBridge | None = None
     bridge_receive_task: asyncio.Task | None = None
+    warmup_task: asyncio.Task | None = None
     jev: JevGovernor = websocket.app.state.jev
+
+    # Welcome sequence: sent immediately after accept, before SETUP frame.
+    await _send_control(
+        websocket,
+        "SESSION_START",
+        source="server",
+        reason="connection_accepted",
+        target_state="WARMUP",
+        payload={
+            "sessionId": session_id,
+            "state": "WARMUP",
+            "strikeCount": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    await _send_control(
+        websocket,
+        "STATE_CHANGE",
+        source="server",
+        reason="warmup_started",
+        target_state="WARMUP",
+        payload={},
+    )
+    warmup_task = asyncio.create_task(_warmup_caption_loop(websocket))
+    logger.info("✓ Warmup caption task started")
 
     try:
         # 1. Receive setup configuration before entering the audio loop.
@@ -254,7 +277,7 @@ async def audio_tutor_ws(websocket: WebSocket) -> None:
         while time.monotonic() < session_end_at:
             try:
                 message = await websocket.receive()
-            except (WebSocketDisconnect, WebSocketDisconnected):
+            except WebSocketDisconnect:
                 logger.info("Client disconnected")
                 # Client closed the connection cleanly or unexpectedly.
                 break
@@ -264,7 +287,7 @@ async def audio_tutor_ws(websocket: WebSocket) -> None:
                 await _handle_audio_frame(websocket, fsm, jev, message["bytes"], bridge)
             elif "text" in message:
                 logger.debug(f"Received text frame: {message['text'][:100]}...")
-                await _handle_text_frame(websocket, fsm, jev, message["text"], bridge)
+                await _handle_text_frame(websocket, fsm, jev, message["text"], bridge, warmup_task)
 
             # Background 3-minute flush check.
             now = time.monotonic()
@@ -295,7 +318,7 @@ async def audio_tutor_ws(websocket: WebSocket) -> None:
                 payload={"final_summary": fsm.to_summary()},
             )
 
-    except (WebSocketDisconnect, WebSocketDisconnected):
+    except WebSocketDisconnect:
         logger.info("WebSocket disconnect caught")
         pass
     except Exception as exc:
@@ -320,6 +343,14 @@ async def audio_tutor_ws(websocket: WebSocket) -> None:
                 pass
             except Exception:
                 pass
+        if warmup_task is not None:
+            try:
+                warmup_task.cancel()
+                await warmup_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
         if bridge is not None:
             try:
                 await bridge.close()
@@ -330,6 +361,23 @@ async def audio_tutor_ws(websocket: WebSocket) -> None:
         except Exception:
             pass
         logger.info("✓ Session cleanup complete")
+
+
+async def _warmup_caption_loop(websocket: WebSocket) -> None:
+    """Send a short sequence of sample caption updates during the warmup phase."""
+    try:
+        for i in range(1, 6):
+            await asyncio.sleep(1.0)
+            await _send_control(
+                websocket,
+                "CAPTION_UPDATE",
+                source="server",
+                reason="warmup_sample",
+                payload={"index": i, "total": 5, "text": f"Sample caption {i}/5"},
+            )
+    except asyncio.CancelledError:
+        logger.info("Warmup caption loop cancelled")
+        raise
 
 
 async def _read_setup(websocket: WebSocket) -> SetupPayload | None:
@@ -404,6 +452,7 @@ async def _handle_text_frame(
     jev: JevGovernor,
     text: str,
     bridge: BaseAudioBridge,
+    warmup_task: asyncio.Task | None = None,
 ) -> None:
     """Parse and act on JSON control frames from the client."""
     try:
@@ -454,6 +503,35 @@ async def _handle_text_frame(
             source="fsm",
             reason="session_resumed",
             target_state=fsm.phase.value,
+            payload={},
+        )
+    elif frame.type == "START_LESSON":
+        if fsm.phase.value != "WARMUP":
+            await _send_control(
+                websocket,
+                "ERROR",
+                source="fsm",
+                reason="start_lesson_only_allowed_in_warmup",
+                target_state=fsm.phase.value,
+                payload={"current_phase": fsm.phase.value},
+            )
+            return
+        try:
+            fsm.transition("DRILL", reason="start_lesson_from_client")
+        except ValueError:
+            pass
+        if warmup_task is not None:
+            warmup_task.cancel()
+            try:
+                await warmup_task
+            except asyncio.CancelledError:
+                pass
+        await _send_control(
+            websocket,
+            "STATE_CHANGE",
+            source="fsm",
+            reason="lesson_started",
+            target_state="DRILL",
             payload={},
         )
     elif frame.type == "PING":
@@ -676,7 +754,7 @@ async def _send_control(
     try:
         logger.info(f"→ Sending control frame: {frame_type} (source={source}, reason={reason})")
         await websocket.send_text(frame.model_dump_json())
-    except (WebSocketDisconnect, WebSocketDisconnected, RuntimeError) as exc:
+    except (WebSocketDisconnect, RuntimeError) as exc:
         # Client already gone; no need to surface this as a server error.
         logger.debug(f"Failed to send {frame_type}: {exc}")
         pass

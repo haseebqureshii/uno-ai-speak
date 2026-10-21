@@ -1,9 +1,9 @@
 """
-Finite State Machine manager for lesson phases, session configuration,
-pedagogical context, and the Coach Alex Socratic Tutor persona.
+Finite State Machine manager for lesson phases.
 
-Also loads the task-based language teaching (TBLT) scenario manifest and
-provides a lightweight, rule-based post-session CEFR speaking assessment.
+Uses the canonical SessionStatus enum from backend/models/schemas.py.
+Maintains the 5-state flow: WARMUP → DRILL → ROLEPLAY → WRAPUP → PAUSE,
+with optional pause/resume support and a lightweight strike/lockout state.
 """
 
 from __future__ import annotations
@@ -11,33 +11,34 @@ from __future__ import annotations
 import json
 import random
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-
-class LessonPhase(str, Enum):
-    """Canonical lesson phases."""
-
-    WARMUP = "WARMUP"
-    DRILL = "DRILL"
-    ROLEPLAY = "ROLEPLAY"
-    PAUSE = "PAUSE"
-    WRAPUP = "WRAPUP"
+try:
+    from backend.models.schemas import SessionStatus, StrikeSeverity
+except ImportError:  # pragma: no cover - path fallback
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from backend.models.schemas import SessionStatus, StrikeSeverity
 
 
-VALID_TRANSITIONS: dict[LessonPhase, set[LessonPhase]] = {
-    LessonPhase.WARMUP: {LessonPhase.DRILL, LessonPhase.PAUSE, LessonPhase.WRAPUP},
-    LessonPhase.DRILL: {LessonPhase.ROLEPLAY, LessonPhase.PAUSE, LessonPhase.WRAPUP},
-    LessonPhase.ROLEPLAY: {LessonPhase.WRAPUP, LessonPhase.PAUSE},
-    LessonPhase.PAUSE: {
-        LessonPhase.WARMUP,
-        LessonPhase.DRILL,
-        LessonPhase.ROLEPLAY,
-        LessonPhase.WRAPUP,
+# Backward-compatible alias for callers that import LessonPhase.
+LessonPhase = SessionStatus
+
+
+VALID_TRANSITIONS: dict[SessionStatus, set[SessionStatus]] = {
+    SessionStatus.WARMUP: {SessionStatus.DRILL, SessionStatus.PAUSE},
+    SessionStatus.DRILL: {SessionStatus.ROLEPLAY, SessionStatus.PAUSE},
+    SessionStatus.ROLEPLAY: {SessionStatus.WRAPUP, SessionStatus.PAUSE},
+    SessionStatus.WRAPUP: {SessionStatus.PAUSE},
+    SessionStatus.PAUSE: {
+        SessionStatus.WARMUP,
+        SessionStatus.DRILL,
+        SessionStatus.ROLEPLAY,
+        SessionStatus.WRAPUP,
     },
-    LessonPhase.WRAPUP: set(),
 }
 
 
@@ -64,6 +65,18 @@ def _load_scenarios() -> list[dict[str, Any]]:
         return []
 
 
+class TransitionError(ValueError):
+    """Raised when a requested state transition is disallowed."""
+
+    def __init__(self, current: SessionStatus, target: SessionStatus, reason: str = "") -> None:
+        self.current = current
+        self.target = target
+        msg = f"Invalid transition from {current.value} to {target.value}"
+        if reason:
+            msg += f": {reason}"
+        super().__init__(msg)
+
+
 class FSMManager:
     """
     Tracks the current lesson phase, active session configuration, vocabulary
@@ -74,6 +87,7 @@ class FSMManager:
     - Exactly one target language is active per session.
     - Coach Alex persona is fixed and non-customizable.
     - L1 Safety Valve is applied only for A1/A2 proficiency levels.
+    - Session state uses the canonical SessionStatus enum.
     """
 
     def __init__(
@@ -88,6 +102,10 @@ class FSMManager:
         vocabulary: list[str] | None = None,
         weak_lexicon: list[str] | None = None,
     ) -> None:
+        if not session_id or not isinstance(session_id, str):
+            raise ValueError("session_id must be a non-empty string")
+        if not client_id or not isinstance(client_id, str):
+            raise ValueError("client_id must be a non-empty string")
         if not target_language:
             raise ValueError("target_language is required and must be a single language")
         if proficiency_level not in {"A1", "A2", "B1", "B2", "C1"}:
@@ -107,7 +125,7 @@ class FSMManager:
         self.scenario: dict[str, Any] = self._select_scenario()
         self.vocabulary: list[str] = vocabulary or self._default_vocabulary()
 
-        self.phase = LessonPhase.WARMUP
+        self.phase = SessionStatus.WARMUP
         self.drift_strikes = 0
         self.is_locked_out = False
         self.lockout_until: datetime | None = None
@@ -124,7 +142,7 @@ class FSMManager:
             "drift_strikes": 0,
         }
         self.last_tutor_text: str = ""
-        self._pause_stack: list[LessonPhase] = []
+        self._pause_stack: list[SessionStatus] = []
 
         # Simple spoken transcript (text when available, byte markers otherwise).
         self.transcript: list[dict[str, Any]] = []
@@ -193,20 +211,25 @@ class FSMManager:
             return ["hallo", "wie geht's", "gut", "danke", "tschüss"]
         return ["hello", "how are you", "good", "thank you", "goodbye"]
 
-    def transition(self, next_state: str, reason: str) -> LessonPhase:
+    def can_transition_to(self, next_state: str | SessionStatus) -> bool:
+        """Return True if the requested state transition is allowed."""
+        target = next_state if isinstance(next_state, SessionStatus) else SessionStatus(next_state)
+        if self.phase == target:
+            return True
+        return target in VALID_TRANSITIONS.get(self.phase, set())
+
+    def transition(self, next_state: str, reason: str) -> SessionStatus:
         """
         Attempt a state transition.
 
         Raises:
-            ValueError: if the requested transition is not in VALID_TRANSITIONS.
+            TransitionError: if the requested transition is not allowed.
         """
-        target = LessonPhase(next_state)
-        if target not in VALID_TRANSITIONS[self.phase]:
-            raise ValueError(
-                f"Invalid transition from {self.phase.value} to {target.value}: {reason}"
-            )
+        target = SessionStatus(next_state)
+        if not self.can_transition_to(target):
+            raise TransitionError(self.phase, target, reason)
 
-        if target == LessonPhase.PAUSE:
+        if target == SessionStatus.PAUSE:
             self._pause_stack.append(self.phase)
 
         previous = self.phase
@@ -214,7 +237,7 @@ class FSMManager:
         self._record_milestone(f"transition:{previous.value}->{target.value}", reason)
         return self.phase
 
-    def resume_from_pause(self) -> LessonPhase:
+    def resume_from_pause(self) -> SessionStatus:
         """Resume from PAUSE to the phase stored on the pause stack."""
         if not self._pause_stack:
             raise ValueError("No paused phase to resume to")
